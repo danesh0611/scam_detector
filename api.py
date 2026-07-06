@@ -96,15 +96,8 @@ async def analyze_audio(
     aws_region_detector: Optional[str] = Form(DEFAULT_AWS_REGION),
     model_id_detector: Optional[str] = Form("meta.llama3-8b-instruct-v1:0")
 ):
-    # Validate file format
-    file_format = file.filename.split(".")[-1].lower()
-    if stt_provider == "local_free" and file_format != "wav":
-        raise HTTPException(
-            status_code=400,
-            detail="The local free STT engine only supports WAV files natively. Please upload a WAV file or use Azure OpenAI Whisper."
-        )
-
     # 1. Save uploaded file temporarily
+    file_format = file.filename.split(".")[-1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_format}") as temp_file:
         shutil.copyfileobj(file.file, temp_file)
         temp_file_path = temp_file.name

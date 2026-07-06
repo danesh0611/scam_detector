@@ -117,7 +117,7 @@ with st.sidebar:
         options=[
             "Azure OpenAI Whisper",
             "AWS Transcribe",
-            "Local Free (Google - WAV only)",
+            "Local Free (Google)",
             "Local Whisper (Offline)"
         ]
     )
@@ -133,8 +133,8 @@ with st.sidebar:
         aws_access_key_id_stt = st.text_input("AWS Access Key (STT)", value=os.getenv("AWS_ACCESS_KEY_ID", ""))
         aws_secret_access_key_stt = st.text_input("AWS Secret Key (STT)", value=os.getenv("AWS_SECRET_ACCESS_KEY", ""), type="password")
         
-    elif stt_provider == "Local Free (Google - WAV only)":
-        st.info("Uses a lightweight Google Web Speech API locally. Completely free, no keys required. Only supports **.wav** files.")
+    elif stt_provider == "Local Free (Google)":
+        st.info("Uses a lightweight Google Web Speech API locally. Completely free, no keys required. Supports any audio format.")
         
     elif stt_provider == "Local Whisper (Offline)":
         st.info("Runs standard Whisper model completely offline on your computer. Requires `openai-whisper` package installed.")
@@ -163,13 +163,8 @@ with col1:
     st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.subheader("📤 Input Media or Text")
     
-    # Set standard upload type constraints
-    if stt_provider == "Local Free (Google - WAV only)":
-        file_types = ["wav"]
-        help_text = "Local free engine only supports .wav files."
-    else:
-        file_types = ["mp3", "wav", "m4a"]
-        help_text = "Supports .mp3, .wav, or .m4a files."
+    file_types = ["mp3", "wav", "m4a"]
+    help_text = "Supports .mp3, .wav, or .m4a files."
         
     input_type = st.radio("Choose Input Format", ["Audio File Upload (Call Recording)", "Raw Message Text"])
     
@@ -206,7 +201,7 @@ with col1:
                                 aws_region=aws_region_stt,
                                 s3_bucket_name=aws_s3_bucket
                             )
-                        elif stt_provider == "Local Free (Google - WAV only)":
+                        elif stt_provider == "Local Free (Google)":
                             transcript = transcribe_audio_local_free(audio_path=temp_file_path)
                         elif stt_provider == "Local Whisper (Offline)":
                             transcript = transcribe_audio_local_whisper(audio_path=temp_file_path)
@@ -217,7 +212,7 @@ with col1:
                     except Exception as e:
                         st.error(f"Transcription failed: {e}")
                         if "DeploymentNotFound" in str(e):
-                            st.warning("⚠️ If you are using Azure OpenAI, make sure your deployment name matches exactly. You can switch to 'Local Free (Google)' to transcribe WAV files without any setup.")
+                            st.warning("⚠️ If you are using Azure OpenAI, make sure your deployment name matches exactly. You can switch to 'Local Free (Google)' to transcribe files without any setup.")
                         elif "SubscriptionRequiredException" in str(e):
                             st.warning("⚠️ Your AWS credentials require a subscription for Amazon Transcribe. Switch to 'Local Free (Google)' or 'Azure OpenAI' to bypass this.")
                     finally:

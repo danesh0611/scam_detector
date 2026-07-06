@@ -136,11 +136,35 @@ def transcribe_audio_aws(
             print(f"Failed to clean up S3 object: {e}")
 
 
+import subprocess
+
+def convert_to_wav(input_path: str) -> str:
+    """
+    Converts any audio file format to WAV format using system-installed ffmpeg.
+    Returns the path to the converted WAV file.
+    """
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {input_path}")
+        
+    output_path = input_path + ".converted.wav"
+    try:
+        cmd = ["ffmpeg", "-y", "-i", input_path, "-ar", "16000", "-ac", "1", output_path]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        return output_path
+    except Exception as e:
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
+        raise RuntimeError(f"FFmpeg conversion to WAV failed: {e}. Make sure ffmpeg is installed system-wide.")
+
+
 def transcribe_audio_local_free(audio_path: str) -> str:
     """
     Transcribes an audio file using SpeechRecognition Google Web Speech API.
     (Completely free, online, requires no keys).
-    Supports WAV format natively.
+    If the file is not a WAV file, it automatically transcodes it to WAV first.
     """
     import speech_recognition as sr
 
@@ -150,19 +174,32 @@ def transcribe_audio_local_free(audio_path: str) -> str:
     filename = os.path.basename(audio_path)
     file_format = filename.split(".")[-1].lower()
 
+    # Transcode if not already a WAV file
+    temp_wav_path = None
     if file_format != "wav":
-        raise ValueError(
-            "The free local transcriber only supports .wav files natively. "
-            "Please upload a WAV file or use Azure/AWS transcribers."
-        )
+        try:
+            temp_wav_path = convert_to_wav(audio_path)
+            target_path = temp_wav_path
+        except Exception as e:
+            raise ValueError(f"Failed to transcode {file_format} to wav: {e}")
+    else:
+        target_path = audio_path
 
-    r = sr.Recognizer()
-    with sr.AudioFile(audio_path) as source:
-        audio_data = r.record(source)
-    
-    # Recognize speech using Google Speech Recognition
-    text = r.recognize_google(audio_data)
-    return text
+    try:
+        r = sr.Recognizer()
+        with sr.AudioFile(target_path) as source:
+            audio_data = r.record(source)
+        
+        # Recognize speech using Google Speech Recognition
+        text = r.recognize_google(audio_data)
+        return text
+    finally:
+        # Clean up temp transcoded WAV file if we created one
+        if temp_wav_path and os.path.exists(temp_wav_path):
+            try:
+                os.remove(temp_wav_path)
+            except Exception:
+                pass
 
 
 def transcribe_audio_local_whisper(audio_path: str) -> str:
