@@ -1,124 +1,215 @@
+# Improved BedrockScamDetector (Hackathon Edition)
 import os
 import json
+import re
 import boto3
 from typing import Optional, Dict, Any
 from flags import FLAGS
 
 class BedrockScamDetector:
     """
-    BedrockScamDetector uses an LLM on Amazon Bedrock to analyze messages/transcripts
-    for scam/fraud indicators, with specialized context for Indian scam tactics.
+    AI-powered Digital Public Safety Intelligence detector.
+    Hybrid approach:
+      • Rule-assisted preprocessing
+      • Bedrock LLM reasoning
+      • Structured JSON output
     """
+
     def __init__(
         self,
-        model_id: str = "meta.llama3-8b-instruct-v1:0",
+        model_id: str = "us.amazon.nova-pro-v1:0",
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
         aws_region: str = "us-east-1",
-        aws_bearer_token_bedrock: Optional[str] = None
+        aws_bearer_token_bedrock: Optional[str] = None,
     ):
         self.model_id = model_id
-        
-        # Configure Bedrock client depending on provided authentication method
+
         if aws_bearer_token_bedrock:
             os.environ["AWS_BEARER_TOKEN_BEDROCK"] = aws_bearer_token_bedrock
-            self.client = boto3.client(
-                service_name="bedrock-runtime",
-                region_name=aws_region
-            )
+            self.client = boto3.client("bedrock-runtime", region_name=aws_region)
         elif aws_access_key_id and aws_secret_access_key:
             self.client = boto3.client(
-                service_name="bedrock-runtime",
+                "bedrock-runtime",
                 region_name=aws_region,
                 aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key
+                aws_secret_access_key=aws_secret_access_key,
             )
         else:
-            # Fall back to AWS environment variables or default credential chain
             self.client = boto3.client(
-                service_name="bedrock-runtime",
-                region_name=aws_region
+                "bedrock-runtime",
+                region_name=aws_region,
             )
 
     def _extract_json(self, text: str) -> str:
-        """Helper to extract clean JSON from LLM response in case of markdown block wrapping."""
         text = text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
-            if lines[0].startswith("```"):
+            if lines:
                 lines = lines[1:]
-            if lines[-1].startswith("```"):
+            if lines and lines[-1].startswith("```"):
                 lines = lines[:-1]
-            text = "\n".join(lines).strip()
-        return text
+            text = "\n".join(lines)
+        return text.strip()
 
-    def analyze(self, text: str) -> Dict[str, Any]:
-        text = text.strip()
-        if not text:
-            return {
-                "verdict": "UNKNOWN",
-                "trust_score": None,
-                "scam_probability": None,
-                "reasons": [],
+    def _entities(self, text: str):
+        return {
+            "phones": re.findall(r"\b(?:\+91[- ]?)?[6-9]\d{9}\b", text),
+            "upi_ids": re.findall(r"\b[\w.\-]{2,}@[A-Za-z]{2,}\b", text),
+            "urls": re.findall(r"https?://\S+|www\.\S+", text),
+        }
+
+    def _default(self):
+        return {
+            "verdict": "UNKNOWN",
+            "risk_level": "LOW",
+            "confidence": 0,
+            "trust_score": None,
+            "scam_probability": None,
+            "category": "UNKNOWN",
+            "reasons": [],
+            "psychological_tactics": [],
+            "entities": {},
+            "victim_status": "UNKNOWN",
+            "recommended_actions": [],
+            "estimated_loss": "Unknown",
+            "digital_arrest_flow": {
+                "current_stage": 0,
+                "stages": {}
             }
+        }
 
-        # Build list of dynamic flags to pass to the model from flags.py
-        flags_desc = "\n".join([
-            f"- '{flag.name}': {flag.explanation} (Clues to match: {flag.pattern})"
-            for flag in FLAGS
-        ])
+    def analyze(self, text: str, metadata: dict = None) -> Dict[str, Any]:
+        if not text.strip():
+            return self._default()
 
-        system_prompt = f"""You are an expert security system designed to analyze messages and calls for potential scam/fraud signals.
-This system is deployed in India, so you should pay special attention to common Indian scam tactics, such as:
-1. UPI scams (requesting to scan a QR code to 'receive' money, Paytm/GPay/PhonePe issues, pending UPI transactions, or UPI PIN requests).
-2. Courier scams (impersonating FedEx, DTDC, India Post, or customs officers claiming illegal items were found in a package addressed to you).
-3. Authority impersonation (fake police officer, TRAI/DoT calling to block SIM card/phone number, electricity board threatening immediate power cut, customs/tax departments).
-4. Bank/KYC updates (SBI, HDFC, ICICI, etc., asking to update KYC, PAN card, or bank details via a suspicious link).
-5. Job offer or task scams (offering part-time work like rating movies or liking YouTube videos for money).
+        flags_desc = "\n".join(
+            f"- {f.name}: {f.explanation}. Pattern: {f.pattern}"
+            for f in FLAGS
+        )
 
-Analyze the provided text and classify it using the following list of flags if applicable:
+        prompt = f"""
+ROLE
+You are India's AI Digital Public Safety Intelligence Agent.
+
+OBJECTIVE
+Analyse transcript + metadata.
+
+TASKS
+1. Decide if SAFE or SCAM.
+2. Classify category.
+3. Estimate confidence.
+4. Estimate scam probability.
+5. Extract entities.
+6. Detect psychological tactics.
+7. Detect digital arrest stage.
+8. Recommend actions.
+9. Minimise false positives.
+
+IMPORTANT
+A real request asking a citizen to physically visit a genuine police station,
+without asking for money/video calls/secrecy, is usually SAFE.
+Also make sure legitimate calls are never classified as scam such as visit physically to legitimate place or legitimate links reduce false positives.
+
+Indian scam categories:
+- DIGITAL_ARREST
+- UPI
+- KYC
+- COURIER
+- CUSTOMS
+- POLICE_IMPERSONATION
+- INVESTMENT
+- TASK
+- JOB
+- ELECTRICITY
+- BANK
+- LOTTERY
+- UNKNOWN
+
+Dynamic flags:
 {flags_desc}
 
-Output your analysis strictly in JSON format. The JSON must have the following structure:
-{{
-  "verdict": "LIKELY SAFE" | "SUSPICIOUS — proceed with caution" | "LIKELY SCAM",
-  "trust_score": float (between 0 and 100, where 100 is fully safe/trustworthy, and 0 is complete scam),
-  "scam_probability": float (between 0 and 100),
-  "reasons": [
-     {{
-       "flag": "one of the flag names listed above",
-       "matched": "exact substring or phrase from the input text that triggered this flag",
-       "why": "brief explanation of why this triggers the flag in the Indian scam context"
-     }}
-  ]
-}}
+Example SAFE
+Input:
+Please come to Mylapore Police Station tomorrow.
 
-Only return the raw JSON object. Do not wrap in markdown code blocks or add any other text.
+Output:
+SAFE
+
+Example SCAM
+Input:
+Your Aadhaar is linked to money laundering.
+Stay on Skype.
+Transfer ₹50000 immediately.
+
+Output:
+DIGITAL_ARREST
+
+Return ONLY JSON:
+
+{{
+"verdict":"",
+"risk_level":"LOW|MEDIUM|HIGH|CRITICAL",
+"confidence":0,
+"trust_score":0,
+"scam_probability":0,
+"category":"",
+"reasons":[{{"flag":"","matched":"","why":""}}],
+"psychological_tactics":[],
+"entities":{{
+"phones":[],
+"upi_ids":[],
+"urls":[],
+"banks":[],
+"couriers":[],
+"government_agencies":[]
+}},
+"victim_status":"",
+"recommended_actions":[],
+"estimated_loss":"",
+"digital_arrest_flow":{{
+"current_stage":0,
+"stages":{{}}
+}}
+}}
 """
+
+        user = text if metadata is None else (
+            "Metadata:\n" + json.dumps(metadata, indent=2) +
+            "\n\nTranscript:\n" + text
+        )
 
         try:
             response = self.client.converse(
                 modelId=self.model_id,
+                system=[{"text": prompt}],
                 messages=[
-                    {"role": "user", "content": [{"text": text}]}
-                ],
-                system=[{"text": system_prompt}]
+                    {
+                        "role": "user",
+                        "content": [{"text": user}]
+                    }
+                ]
             )
-            raw_output = response['output']['message']['content'][0]['text']
-            clean_output = self._extract_json(raw_output)
-            
-            result = json.loads(clean_output)
-            
-            # Ensure required keys exist
-            for key in ["verdict", "trust_score", "scam_probability", "reasons"]:
-                if key not in result:
-                    result[key] = None if key != "reasons" else []
-            return result
+
+            raw = response["output"]["message"]["content"][0]["text"]
+            parsed = json.loads(self._extract_json(raw))
+
+            defaults = self._default()
+            for k, v in defaults.items():
+                parsed.setdefault(k, v)
+
+            ents = self._entities(text)
+            parsed["entities"].setdefault("phones", ents["phones"])
+            parsed["entities"].setdefault("upi_ids", ents["upi_ids"])
+            parsed["entities"].setdefault("urls", ents["urls"])
+
+            return parsed
 
         except Exception as e:
-            return {
-                "verdict": "UNKNOWN (Error during Bedrock call)",
-                "trust_score": None,
-                "scam_probability": None,
-                "reasons": [{"flag": "error", "matched": "", "why": str(e)}],
-            }
+            out = self._default()
+            out["reasons"] = [{
+                "flag": "runtime_error",
+                "matched": "",
+                "why": str(e)
+            }]
+            return out

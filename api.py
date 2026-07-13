@@ -1,6 +1,7 @@
 import os
 import tempfile
 import shutil
+import time
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException, Form
 from pydantic import BaseModel
@@ -40,12 +41,23 @@ class TextInput(BaseModel):
     aws_secret_access_key: Optional[str] = None
     aws_bearer_token_bedrock: Optional[str] = DEFAULT_BEDROCK_TOKEN
 
+class SessionInput(BaseModel):
+    text: str
+    metadata: Optional[dict] = None
+    engine: str = "local"  # "local" or "bedrock"
+    model_id: Optional[str] = "meta.llama3-8b-instruct-v1:0"
+    aws_region: Optional[str] = DEFAULT_AWS_REGION
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_bearer_token_bedrock: Optional[str] = DEFAULT_BEDROCK_TOKEN
+
 @app.get("/")
 def read_root():
     return {
         "message": "Welcome to ScamShield Pro REST API!",
         "endpoints": {
             "POST /analyze-text": "Analyze raw message text for scam signals.",
+            "POST /analyze-session": "Analyze active calls/sessions with transcript and caller/video metadata.",
             "POST /analyze-audio": "Upload an audio recording, transcribe it, and analyze it.",
             "GET /health": "Verify API service health."
         }
@@ -54,6 +66,83 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "ScamShield Pro API"}
+
+@app.post("/analyze-session")
+def analyze_session(payload: SessionInput):
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="Text payload cannot be empty.")
+
+    try:
+        if payload.engine == "bedrock":
+            detector = BedrockScamDetector(
+                model_id=payload.model_id,
+                aws_region=payload.aws_region,
+                aws_access_key_id=payload.aws_access_key_id,
+                aws_secret_access_key=payload.aws_secret_access_key,
+                aws_bearer_token_bedrock=payload.aws_bearer_token_bedrock
+            )
+        else:
+            detector = ScamDetector()
+        
+        result = detector.analyze(payload.text, payload.metadata)
+        
+        # Determine telecom actions and victim alert based on scam probability
+        scam_prob = result.get("scam_probability", 0)
+        telecom_actions = []
+        victim_alert = False
+        
+        if scam_prob >= 75:
+            telecom_actions = ["quarantine_call", "sms_warning_sent", "log_suspect_number", "block_caller"]
+            victim_alert = True
+        elif scam_prob >= 40:
+            telecom_actions = ["sms_warning_sent", "log_suspect_number"]
+            victim_alert = True
+            
+        result["telecom_intervention"] = {
+            "actions_triggered": telecom_actions,
+            "victim_warning_active": victim_alert,
+            "system_timestamp": int(time.time())
+        }
+        
+        # MHA Alert generation
+        if scam_prob >= 40:
+            meta = payload.metadata or {}
+            caller_id = meta.get("caller_id", "Unknown")
+            voip_flag = meta.get("voip", False)
+            stir_flag = meta.get("stir_shaken", "UNKNOWN")
+            video_platform = meta.get("platform", "Unknown")
+            background_flag = meta.get("synthetic_background", False)
+            screen_share_flag = meta.get("screen_sharing", False)
+            
+            stage_info = result.get("digital_arrest_flow", {}).get("current_stage", 0)
+            
+            result["mha_alert"] = {
+                "incident_id": f"MHA-I4C-{int(time.time())}",
+                "reporting_agency": "ScamShield Telecom Intercept Grid",
+                "suspect_details": {
+                    "caller_id": caller_id,
+                    "voip_indicator": voip_flag,
+                    "stir_shaken_status": stir_flag,
+                    "video_platform": video_platform,
+                    "synthetic_background_detected": background_flag,
+                    "screen_sharing_active": screen_share_flag
+                },
+                "evidence": {
+                    "active_stage": stage_info,
+                    "transcript_snippet": payload.text[-500:],
+                    "full_transcript_length": len(payload.text),
+                    "triggered_flags": [r["flag"] for r in result.get("reasons", [])]
+                },
+                "status": "DRAFT_ALERT_GENERATED",
+                "dispatch_endpoint": "https://cybercrime.gov.in/api/v1/alerts"
+            }
+        else:
+            result["mha_alert"] = None
+            
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/analyze-text")
 def analyze_text(payload: TextInput):

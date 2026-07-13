@@ -23,7 +23,17 @@ SCAM_EXAMPLES = [
     "Tech support here — we saw errors on your computer, download this remote tool so we can fix it right away.",
     "Your card has been charged $499 for a subscription, if this wasn't you call this number immediately to cancel.",
     "You qualify for a government grant of $9500, just pay a small processing fee to receive the funds.",
-    "This is your bank calling. For your safety, do not hang up and do not discuss this call with anyone, we need to verify your PIN.",
+    "This is the Central Bureau of Investigation (CBI) calling. A parcel containing MDMA drugs and fake passports was sent in your name. You must go to a quiet room and connect to Skype for a digital arrest.",
+    "You are under digital arrest by the Delhi Police. Do not turn off your camera, do not talk to family, and stay in the frame until we verify your bank accounts.",
+    "This is the Telecom Regulatory Authority (TRAI). Your mobile number is linked to illegal advertisements and money laundering. We are transferring you to the Cyber Crime Department for verification.",
+    "Your parcel from FedEx has been intercepted by customs officials in Mumbai. They found 5 passports, 3 bank cards, and 200 grams of illegal narcotics. You are now placed under digital arrest.",
+    "To clear your name from the CBI drug trafficking case, you must transfer your savings to the government's safe verification account. It will be refunded within 30 minutes.",
+    "This is the Enforcement Directorate (ED). We have registered a case against you for a transaction of 50 Lakhs. You must keep your video call active and cannot make external calls.",
+    "Delhi Police cyber cell department here. A case of identity theft and illegal fund transfers has been registered under your Aadhar card. Connect to Skype immediately for a statement.",
+    "hi pelase send me 1000i will double it in 1 sec",
+    "Dear Customer, your electricity will be disconnected tonight by 9:30 PM. Call this number to pay immediately.",
+    "Invest $500 today and get guaranteed 200% returns in 24 hours. Click this link to start doubling your money.",
+    "Your bank account has been blocked due to suspicious activity. Click here to verify your identity and restore access.",
 ]
 
 LEGIT_EXAMPLES = [
@@ -47,4 +57,10 @@ LEGIT_EXAMPLES = [
     "Let's catch up this weekend, it's been a while!",
     "Your library book is due back in 3 days.",
     "The meeting notes have been shared in the drive folder, take a look when free.",
+    "Hello, this is SBI customer service. We wanted to confirm if you initiated a change in your registered home branch?",
+    "Hi, I got a package from DTDC courier for you, are you at home to collect it?",
+    "Your Zoom meeting link for the interview is scheduled at 4 PM today. Please make sure your camera is working.",
+    "Hi dad, can we do a Skype call tonight to discuss the trip details?",
+    "Dear customer, your request for blocking your misplaced SIM card has been processed successfully.",
 ]
+

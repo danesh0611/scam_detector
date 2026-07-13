@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
-from flags import rule_score, detect_flags
+from flags import rule_score, detect_flags, analyze_digital_arrest_flow
 from data.sample_data import SCAM_EXAMPLES, LEGIT_EXAMPLES
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "scam_model.joblib")
@@ -52,7 +52,7 @@ class ScamDetector:
     def __init__(self, model_path: str = MODEL_PATH):
         self.pipe = load_model(model_path)
 
-    def analyze(self, text: str) -> dict:
+    def analyze(self, text: str, metadata: dict = None) -> dict:
         text = text.strip()
         if not text:
             return {
@@ -60,15 +60,19 @@ class ScamDetector:
                 "trust_score": None,
                 "scam_probability": None,
                 "reasons": [],
+                "digital_arrest_flow": {
+                    "current_stage": 0,
+                    "stages": {}
+                }
             }
 
         ml_prob = float(self.pipe.predict_proba([text])[0][1])  # P(scam)
-        r_score = rule_score(text)
-        hits = detect_flags(text)
+        r_score = rule_score(text, metadata)
+        hits = detect_flags(text, metadata)
 
         blended = ML_WEIGHT * ml_prob + RULE_WEIGHT * r_score
 
-        # A single very strong rule (credential/payment/remote-access request)
+        # A single very strong rule (credential/payment/remote-access request, or digital arrest isolation/finance)
         # should never be fully washed out by a low ML score.
         strong_hits = [f for f, _ in hits if f.weight >= 0.65]
         if strong_hits:
@@ -88,6 +92,8 @@ class ScamDetector:
             for f, snippet in hits
         ]
 
+        flow_analysis = analyze_digital_arrest_flow(text)
+
         return {
             "verdict": verdict,
             "trust_score": trust_score,          # 0 (no trust) - 100 (fully trustworthy)
@@ -95,7 +101,9 @@ class ScamDetector:
             "ml_probability": round(ml_prob * 100, 1),
             "rule_score": round(r_score * 100, 1),
             "reasons": reasons,
+            "digital_arrest_flow": flow_analysis,
         }
+
 
 
 if __name__ == "__main__":

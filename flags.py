@@ -98,13 +98,68 @@ FLAGS = [
         "Asks you to install remote-access software — commonly used to take "
         "control of your device or bank app."
     ),
+    Flag(
+        "digital_arrest_authority", 0.65,
+        r"\b(cbi|central bureau of investigation|enforcement directorate|ed|customs officer|"
+        r"delhi police|mumbai police|cyber crime cell|trai|telecom regulatory authority|dot|department of telecom)\b",
+        "Impersonates Indian law enforcement or regulatory authorities (CBI, ED, Police, TRAI) which is key to digital arrest setups."
+    ),
+    Flag(
+        "digital_arrest_accusation", 0.70,
+        r"\b(mdma|narcotics|drug parcel|illegal package|money laundering|identity theft|"
+        r"passport misuse|arrest warrant|illegal advertisements|illegal transaction)\b",
+        "Accuses you of illegal activity like drug trafficking or money laundering to induce panic."
+    ),
+    Flag(
+        "digital_arrest_isolation", 0.85,
+        r"\b(digital arrest|keep camera on|don'?t turn off (your |)camera|stay in (the |)frame|"
+        r"go to a quiet room|do not hang up|skype video|connect to Skype|zoom verification)\b",
+        "Demands you stay on a video call in isolation ('digital arrest') — a major red flag as law enforcement never does this."
+    ),
+    Flag(
+        "digital_arrest_finance", 0.80,
+        r"\b(verification (of )?funds|verify your (funds|balance|savings)|safety account|rbi clearance|"
+        r"refundable deposit|transfer.*(savings|funds)|verify wealth|government account)\b",
+        "Demands transferring money to a 'safety' or 'government' account for verification."
+    ),
+    Flag(
+        "caller_spoofing", 0.60,
+        r"\b(caller_id=\+92|stir_shaken=FAILED|voip=True)\b",
+        "Incoming call shows signs of spoofing, like virtual numbers, international prefixes for local cases, or STIR/SHAKEN failure."
+    ),
+    Flag(
+        "suspicious_video", 0.65,
+        r"\b(platform=(Skype|WhatsApp|Zoom)|synthetic_background=True|screen_sharing=True)\b",
+        "Video metadata shows signs of scam activity: synthetic backgrounds to mimic police offices, or requests to share screens."
+    ),
 ]
 
 _COMPILED = [(f, re.compile(f.pattern, re.IGNORECASE)) for f in FLAGS]
 
 
-def detect_flags(text: str):
+def format_metadata(metadata: dict) -> str:
+    if not metadata:
+        return ""
+    parts = []
+    if "caller_id" in metadata and metadata["caller_id"]:
+        parts.append(f"caller_id={metadata['caller_id']}")
+    if "voip" in metadata and metadata["voip"]:
+        parts.append(f"voip={metadata['voip']}")
+    if "stir_shaken" in metadata and metadata["stir_shaken"]:
+        parts.append(f"stir_shaken={metadata['stir_shaken']}")
+    if "platform" in metadata and metadata["platform"]:
+        parts.append(f"platform={metadata['platform']}")
+    if "synthetic_background" in metadata and metadata["synthetic_background"]:
+        parts.append(f"synthetic_background={metadata['synthetic_background']}")
+    if "screen_sharing" in metadata and metadata["screen_sharing"]:
+        parts.append(f"screen_sharing={metadata['screen_sharing']}")
+    return "\n[Metadata: " + ", ".join(parts) + "]"
+
+
+def detect_flags(text: str, metadata: dict = None):
     """Return list of (Flag, matched_snippet) for every rule that fires."""
+    if metadata:
+        text = text + format_metadata(metadata)
     hits = []
     for flag, rx in _COMPILED:
         m = rx.search(text)
@@ -113,16 +168,68 @@ def detect_flags(text: str):
     return hits
 
 
-def rule_score(text: str) -> float:
+def rule_score(text: str, metadata: dict = None) -> float:
     """
     Combine triggered flag weights into a 0-1 'rule score'.
     Uses a soft-OR (1 - product of (1-w)) so multiple weak signals still
     add up, but a single very strong signal isn't diluted.
     """
-    hits = detect_flags(text)
+    hits = detect_flags(text, metadata)
     if not hits:
         return 0.0
     remaining = 1.0
     for flag, _ in hits:
         remaining *= (1 - flag.weight)
     return round(1 - remaining, 4)
+
+
+def analyze_digital_arrest_flow(text: str) -> dict:
+    """
+    Analyzes the transcript text and determines which digital arrest scam stages are active.
+    Stages:
+      1. Contact & Identity: Impersonation of agencies or delivery services.
+      2. Accusation & Threat: Allegations of drug parcels, money laundering, SIM blocking.
+      3. Digital Arrest / Isolation: Demands to stay on video, lock the room, Skype transition.
+      4. Financial Transfer: Demands for fund verification or account transfers.
+    """
+    stages = {
+        1: {
+            "name": "Contact & Identity Impersonation",
+            "active": False,
+            "description": "Scammer impersonates TRAI, FedEx, DHL, or Customs officers.",
+            "triggers": [r"\b(fedex|dhl|customs|trai|dot|department of telecom|telecom regulatory)\b"]
+        },
+        2: {
+            "name": "Accusation & Secrecy",
+            "active": False,
+            "description": "Scammer accuses victim of illegal parcels (MDMA, passports) or money laundering.",
+            "triggers": [r"\b(mdma|drugs?|narcotics?|passports?|money laundering|illegal transaction|arrest warrant|cbi|police|ed|enforcement directorate|identity theft)\b"]
+        },
+        3: {
+            "name": "Digital Arrest & Isolation",
+            "active": False,
+            "description": "Scammer forces victim onto a video call (Skype/Zoom) under 'digital arrest' in a closed room.",
+            "triggers": [r"\b(digital arrest|keep camera on|quiet room|don'?t hang up|skype|zoom|stay in frame)\b"]
+        },
+        4: {
+            "name": "Financial Transfer Demand",
+            "active": False,
+            "description": "Scammer demands victim transfer funds to a 'government safety account' for verification.",
+            "triggers": [r"\b(verification (of )?funds|verify your bank|verify.*(funds|balance|savings)|safety account|rbi clearance|refundable deposit|transfer.*(savings|funds)|send money|payment)\b"]
+        }
+    }
+    
+    active_stage = 0
+    highest_active = 0
+    for stage_idx, stage_data in stages.items():
+        for trigger in stage_data["triggers"]:
+            if re.search(trigger, text, re.IGNORECASE):
+                stage_data["active"] = True
+                highest_active = max(highest_active, stage_idx)
+                break
+                
+    return {
+        "current_stage": highest_active,
+        "stages": {idx: {"name": d["name"], "active": d["active"], "description": d["description"]} for idx, d in stages.items()}
+    }
+
