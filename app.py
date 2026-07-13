@@ -228,7 +228,7 @@ with st.sidebar:
         st.markdown("#### AWS Bedrock Options")
         aws_token = st.text_input("Bedrock Bearer Token", value=os.getenv("AWS_BEARER_TOKEN_BEDROCK", ""), type="password")
         aws_region = st.text_input("AWS Region", value=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-        model_id = st.text_input("Bedrock Model ID", value=os.getenv("AWS_BEDROCK_MODEL_ID", "meta.llama3-8b-instruct-v1:0"))
+        model_id = st.text_input("Bedrock Model ID", value=os.getenv("AWS_BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0"))
     else:
         st.info("Using local TF-IDF & Logistic Regression with rule-based heuristics.")
 
