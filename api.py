@@ -224,7 +224,7 @@ def analyze_text(payload: TextInput):
 @app.post("/analyze-audio")
 async def analyze_audio(
     file: UploadFile = File(...),
-    stt_provider: str = Form("local_free"),  # "azure", "aws", "local_whisper", "local_free"
+    stt_provider: str = Form("local_whisper"),  # "azure", "aws", "local_whisper", "local_free"
     engine: str = Form("local"),  # "local", "bedrock"
     # Azure Whisper Credentials
     azure_endpoint: Optional[str] = Form(DEFAULT_AZURE_ENDPOINT),
