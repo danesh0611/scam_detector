@@ -302,6 +302,9 @@ async def analyze_audio(
 def add_report(
     phone: str = Form(...),
     description: str = Form(...),
+    source: Optional[str] = Form(None),
+    suspect_phone: Optional[str] = Form(None),
+    incident_date: Optional[str] = Form(None),
     lat: float = Form(13.0827),
     lng: float = Form(80.2707),
     screenshot: Optional[UploadFile] = File(None),
@@ -324,7 +327,7 @@ def add_report(
     # Create the Report Node
     db_nodes.append({
         "id": report_id,
-        "label": f"Report: {report_id}",
+        "label": f"Report: {report_id}" + (f" ({source})" if source else ""),
         "type": "scam_report",
         "riskScore": 0.50
     })
@@ -345,15 +348,23 @@ def add_report(
         "strength": 1.0
     })
     
-    # 3. Dynamic Extraction from Description for Suspects!
+    # 3. Dynamic Extraction & Explicit Suspects
     phone_matches = re.findall(r'\b\d{10}\b', description)
     upi_matches = re.findall(r'\b[a-zA-Z0-9.\-_]+@[a-zA-Z]+\b', description)
     
     has_suspects = False
+
+    # Use explicitly provided suspect phone if available
+    if suspect_phone and suspect_phone != phone:
+        suspect_id = f"S-{uuid.uuid4().hex[:6].upper()}"
+        db_nodes.append({"id": suspect_id, "label": f"Scammer Ph: {suspect_phone}", "type": "phone_number", "riskScore": 0.98})
+        db_edges.append({"source": report_id, "target": suspect_id, "relationship": "mentions_suspect", "strength": 0.95})
+        has_suspects = True
     
+    # Use regex matches
     if phone_matches:
         for p in set(phone_matches):
-            if p != phone: # Don't flag the victim's own number
+            if p != phone and p != suspect_phone: # Don't duplicate explicit suspect
                 suspect_id = f"S-{uuid.uuid4().hex[:6].upper()}"
                 db_nodes.append({"id": suspect_id, "label": f"Scammer Ph: {p}", "type": "phone_number", "riskScore": 0.95})
                 db_edges.append({"source": report_id, "target": suspect_id, "relationship": "mentions_suspect", "strength": 0.9})
@@ -366,7 +377,7 @@ def add_report(
             db_edges.append({"source": report_id, "target": upi_id, "relationship": "mentions_account", "strength": 0.95})
             has_suspects = True
             
-    # If no suspect info found in description, create a generic one
+    # If no suspect info found, create a generic one
     if not has_suspects:
         suspect_id = f"S-{uuid.uuid4().hex[:6].upper()}"
         db_nodes.append({"id": suspect_id, "label": "Unknown Scammer", "type": "suspect", "riskScore": 0.80})
