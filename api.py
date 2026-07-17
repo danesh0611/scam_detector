@@ -19,11 +19,45 @@ from transcribe_stub import (
 # Load environment variables on startup
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env.local"))
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="ScamShield Pro REST API",
     description="REST API endpoints for Speech-To-Text translation and Scam Detection analysis.",
     version="1.0"
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+import uuid
+
+# --- In-Memory Hackathon Database ---
+db_officers = {
+    "POL-12345": {"password": "password123", "name": "Insp. Rajesh Kumar", "rank": "Inspector", "station": "Cyber Crime Cell, HQ"},
+    "POL-99999": {"password": "admin", "name": "Chief Anita Sharma", "rank": "Chief", "station": "Central Command"}
+}
+
+db_heatmap = [
+    {"lat": 13.0827, "lng": 80.2707, "intensity": 0.8},
+    {"lat": 13.0604, "lng": 80.2496, "intensity": 0.5}
+]
+
+db_nodes = [
+    {"id": "N1", "label": "SBI Acc. ***4521", "type": "bank_account", "riskScore": 0.95},
+    {"id": "N2", "label": "+91 98765 XXXXX", "type": "phone_number", "riskScore": 0.9},
+    {"id": "N3", "label": "Device #A7F3", "type": "ip_address", "riskScore": 0.85}
+]
+
+db_edges = [
+    {"source": "N1", "target": "N2", "relationship": "registered_phone", "strength": 0.95},
+    {"source": "N2", "target": "N3", "relationship": "used_device", "strength": 0.9}
+]
 
 # --- Default Credentials ---
 DEFAULT_AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
@@ -66,6 +100,27 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "ScamShield Pro API"}
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/login")
+def login(req: LoginRequest):
+    officer = db_officers.get(req.username)
+    if not officer or officer["password"] != req.password:
+        raise HTTPException(status_code=401, detail="Invalid badge number or password")
+        
+    return {
+        "token": f"token-{uuid.uuid4().hex}",
+        "officer": {
+            "id": f"OFF-{req.username}",
+            "name": officer["name"],
+            "badge": req.username,
+            "rank": officer["rank"],
+            "station": officer["station"]
+        }
+    }
 
 @app.post("/analyze-session")
 def analyze_session(payload: SessionInput):
@@ -242,3 +297,62 @@ async def analyze_audio(
         # Clean up temp file
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+@app.post("/report")
+def add_report(
+    phone: str = Form(...),
+    description: str = Form(...),
+    lat: float = Form(13.0827),
+    lng: float = Form(80.2707),
+    screenshot: Optional[UploadFile] = File(None),
+    currencyImage: Optional[UploadFile] = File(None),
+    audio: Optional[UploadFile] = File(None),
+    video: Optional[UploadFile] = File(None)
+):
+    # 1. Add to Heatmap
+    db_heatmap.append({
+        "lat": lat,
+        "lng": lng,
+        "intensity": 1.0
+    })
+    
+    # 2. Add to Graph Network
+    report_id = f"R-{uuid.uuid4().hex[:6].upper()}"
+    phone_id = f"P-{uuid.uuid4().hex[:6].upper()}"
+    
+    # Create a Suspect Node for the report
+    db_nodes.append({
+        "id": report_id,
+        "label": f"Report: {report_id}",
+        "type": "suspect",
+        "riskScore": 0.99
+    })
+    
+    # Create a Phone Node for the scammer
+    db_nodes.append({
+        "id": phone_id,
+        "label": phone,
+        "type": "phone_number",
+        "riskScore": 0.90
+    })
+    
+    # Link them
+    db_edges.append({
+        "source": report_id,
+        "target": phone_id,
+        "relationship": "used_by_suspect",
+        "strength": 1.0
+    })
+    
+    return {"success": True, "complaintId": report_id, "message": "Report submitted and graph updated."}
+
+@app.get("/heatmap")
+def get_heatmap():
+    return db_heatmap
+
+@app.get("/fraud-network")
+def get_fraud_network():
+    return {
+        "nodes": db_nodes,
+        "edges": db_edges
+    }
