@@ -317,32 +317,60 @@ def add_report(
     })
     
     # 2. Add to Graph Network
+    import re
     report_id = f"R-{uuid.uuid4().hex[:6].upper()}"
-    phone_id = f"P-{uuid.uuid4().hex[:6].upper()}"
+    victim_id = f"V-{uuid.uuid4().hex[:6].upper()}"
     
-    # Create a Suspect Node for the report
+    # Create the Report Node
     db_nodes.append({
         "id": report_id,
         "label": f"Report: {report_id}",
-        "type": "suspect",
-        "riskScore": 0.99
+        "type": "scam_report",
+        "riskScore": 0.50
     })
     
-    # Create a Phone Node for the scammer
+    # Create the Victim Node (the phone number from the form)
     db_nodes.append({
-        "id": phone_id,
-        "label": phone,
-        "type": "phone_number",
-        "riskScore": 0.90
+        "id": victim_id,
+        "label": f"Victim ({phone})",
+        "type": "victim",
+        "riskScore": 0.10
     })
     
-    # Link them
+    # Link Victim to Report
     db_edges.append({
-        "source": report_id,
-        "target": phone_id,
-        "relationship": "used_by_suspect",
+        "source": victim_id,
+        "target": report_id,
+        "relationship": "reported_by",
         "strength": 1.0
     })
+    
+    # 3. Dynamic Extraction from Description for Suspects!
+    phone_matches = re.findall(r'\b\d{10}\b', description)
+    upi_matches = re.findall(r'\b[a-zA-Z0-9.\-_]+@[a-zA-Z]+\b', description)
+    
+    has_suspects = False
+    
+    if phone_matches:
+        for p in set(phone_matches):
+            if p != phone: # Don't flag the victim's own number
+                suspect_id = f"S-{uuid.uuid4().hex[:6].upper()}"
+                db_nodes.append({"id": suspect_id, "label": f"Scammer Ph: {p}", "type": "phone_number", "riskScore": 0.95})
+                db_edges.append({"source": report_id, "target": suspect_id, "relationship": "mentions_suspect", "strength": 0.9})
+                has_suspects = True
+                
+    if upi_matches:
+        for u in set(upi_matches):
+            upi_id = f"U-{uuid.uuid4().hex[:6].upper()}"
+            db_nodes.append({"id": upi_id, "label": f"UPI: {u}", "type": "bank_account", "riskScore": 0.99})
+            db_edges.append({"source": report_id, "target": upi_id, "relationship": "mentions_account", "strength": 0.95})
+            has_suspects = True
+            
+    # If no suspect info found in description, create a generic one
+    if not has_suspects:
+        suspect_id = f"S-{uuid.uuid4().hex[:6].upper()}"
+        db_nodes.append({"id": suspect_id, "label": "Unknown Scammer", "type": "suspect", "riskScore": 0.80})
+        db_edges.append({"source": report_id, "target": suspect_id, "relationship": "investigating", "strength": 0.5})
     
     return {"success": True, "complaintId": report_id, "message": "Report submitted and graph updated."}
 
