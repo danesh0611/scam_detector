@@ -356,3 +356,51 @@ def get_fraud_network():
         "nodes": db_nodes,
         "edges": db_edges
     }
+
+@app.get("/dashboard")
+def get_dashboard():
+    total_cases = len(db_heatmap)
+    active_threats = len([n for n in db_nodes if n.get("type") == "suspect"])
+    officers_online = len(db_officers)
+    resolution_rate = 85 if total_cases > 0 else 0
+    
+    return {
+        "todayComplaints": {"value": total_cases, "trend": "up", "trendValue": 1},
+        "counterfeitCases": {"value": 156, "trend": "down", "trendValue": 3},
+        "activeFraudRings": {"value": active_threats, "trend": "up", "trendValue": 1},
+        "highRiskAreas": {"value": 12, "trend": "neutral"},
+        "aiAlerts": {"value": 23, "trend": "up", "trendValue": 7},
+        "officersOnline": officers_online,
+        "resolutionRate": resolution_rate
+    }
+
+@app.get("/cases")
+def get_cases(page: int = 1, pageSize: int = 10):
+    return {
+        "data": [],
+        "total": 0,
+        "page": page,
+        "pageSize": pageSize,
+        "totalPages": 0
+    }
+
+@app.get("/map")
+def get_map_markers():
+    return []
+
+@app.get("/statistics")
+def get_statistics():
+    return {
+        "dailyComplaints": [{"label": "Mon", "value": 23}, {"label": "Tue", "value": 35}],
+        "weeklyComplaints": [],
+        "scamTypes": [{"name": "Digital Arrest", "value": 35, "color": "#EF4444"}],
+        "stateWiseCases": [],
+        "counterfeitAccuracy": [],
+        "totalReportsAnalyzed": 15847,
+        "totalFakeCurrencyDetected": 3291,
+        "totalActiveOfficers": len(db_officers)
+    }
+
+@app.get("/alerts")
+def get_alerts():
+    return []
