@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException, Form
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import boto3
 
 from model import ScamDetector
 from bedrock_detector import BedrockScamDetector
@@ -85,6 +86,14 @@ class SessionInput(BaseModel):
     aws_secret_access_key: Optional[str] = None
     aws_bearer_token_bedrock: Optional[str] = DEFAULT_BEDROCK_TOKEN
 
+class CurrencyInput(BaseModel):
+    image_base64: Optional[str] = None
+    mime_type: Optional[str] = "image/jpeg"
+    text_prompt: Optional[str] = None
+    system_instruction: str
+    aws_region: Optional[str] = DEFAULT_AWS_REGION
+    aws_bearer_token_bedrock: Optional[str] = DEFAULT_BEDROCK_TOKEN
+
 @app.get("/")
 def read_root():
     return {
@@ -100,6 +109,57 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "ScamShield Pro API"}
+
+@app.post("/analyze-currency")
+def analyze_currency(payload: CurrencyInput):
+    """
+    Fallback endpoint for currency analysis via AWS Bedrock (Nova Pro).
+    Receives base64 image and text, invokes multimodal LLM, returns strict JSON.
+    """
+    if payload.aws_bearer_token_bedrock:
+        os.environ["AWS_BEARER_TOKEN_BEDROCK"] = payload.aws_bearer_token_bedrock
+        
+    client = boto3.client("bedrock-runtime", region_name=payload.aws_region)
+    
+    content_blocks = []
+    if payload.image_base64:
+        content_blocks.append({
+            "image": {
+                "format": payload.mime_type.split("/")[-1] if "/" in payload.mime_type else "jpeg",
+                "source": {
+                    "bytes": bytes.fromhex(payload.image_base64) if payload.image_base64.startswith("hex:") else __import__("base64").b64decode(payload.image_base64)
+                }
+            }
+        })
+    if payload.text_prompt:
+        content_blocks.append({"text": payload.text_prompt})
+        
+    if not content_blocks:
+        raise HTTPException(status_code=400, detail="Must provide image or text")
+        
+    try:
+        response = client.converse(
+            modelId="us.amazon.nova-pro-v1:0",
+            system=[{"text": payload.system_instruction + "\n\nYou MUST return raw valid JSON. Do not use markdown blocks."}],
+            messages=[{"role": "user", "content": content_blocks}]
+        )
+        
+        raw_text = response["output"]["message"]["content"][0]["text"]
+        # Strip potential markdown blocks
+        raw_text = raw_text.strip()
+        if raw_text.startswith("```"):
+            lines = raw_text.splitlines()
+            if len(lines) > 1:
+                raw_text = "\n".join(lines[1:])
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+                
+        import json
+        return json.loads(raw_text.strip())
+        
+    except Exception as e:
+        print(f"AWS Bedrock Fallback Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class LoginRequest(BaseModel):
     username: str
